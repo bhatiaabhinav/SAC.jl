@@ -1,0 +1,12 @@
+name = "SAC"
+uuid = "17080c02-d5d4-474d-83e9-109cd4596677"
+authors = ["Abhinav Bhatia <abhinav.bhatia.me@gmail.com>"]
+version = "0.1.0"
+
+[deps]
+DataStructures = "864edb3b-99cc-5e75-8d2d-829cb0a9cfe8"
+Flux = "587475ba-b771-5e3f-ad9e-33799f191a9c"
+MDPs = "11f886ef-95cd-43ae-b218-d50c093ca059"
+Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
+StatsBase = "2913bbd2-ae8a-5f71-8c99-4fb6c76f3a91"
+UnPack = "3a884ed6-31ef-47d7-9d2a-63182c4928ed"
