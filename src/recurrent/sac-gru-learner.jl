@@ -135,37 +135,6 @@ function poststep(sac::RecurrentSACLearner{Tₛ, Tₐ}; env::AbstractMDP{Vector{
         critic1, critic2 = critics
         critic1′, critic2′ = critics′
 
-        function actor_update_sequential()
-            θ = Flux.params(actor, actor_crnn)
-            
-            Flux.reset!.((actor_crnn, critic_crnn))
-            fill!(𝐜ᶜ, 0f0)
-            for t in 1:horizon
-                𝐜ᶜ[:, t, :] .= critic_crnn(𝐞[:, t, :])
-            end
-            𝐬ᶜ::AbstractArray{Float32, 3} = vcat(𝐜ᶜ[:, 1:horizon, :], 𝐨)
-
-            entropy = 0f0
-            ℓθ, ∇θℓ = withgradient(θ) do
-                ℓθ = 0f0
-                for t in 1:horizon
-                    𝐜ₜᵃ = actor_crnn(𝐞[:, t, :])
-                    𝐨ₜ = Zygote.@ignore 𝐨[:, t, :]
-                    𝐬ₜᵃ = vcat(𝐜ₜᵃ, 𝐨ₜ)
-                    𝐚̃ₜ, 𝐥𝐨𝐠𝛑𝐚̃ₜ = sample_action_logπ(actor, rng, 𝐬ₜᵃ)
-                    𝐬ₜᶜ = Zygote.@ignore 𝐬ᶜ[:, t, :]
-                    𝐬ₜᶜ𝐚̃ₜ = vcat(𝐬ₜᶜ, 𝐚̃ₜ)
-                    𝐪̂𝐚̃ₜ = min.(critic1(𝐬ₜᶜ𝐚̃ₜ), critic2(𝐬ₜᶜ𝐚̃ₜ))
-                    𝐯̂ₜ = 𝐪̂𝐚̃ₜ[1, :] - α * 𝐥𝐨𝐠𝛑𝐚̃ₜ  # estimated value of sₜ in expectation over 𝐚̃ₜ
-                    entropy += -mean(𝐥𝐨𝐠𝛑𝐚̃ₜ) / horizon
-                    ℓθ += -mean(𝐯̂ₜ) / horizon
-                end
-                return ℓθ
-            end
-            Flux.update!(sac.optim_actor, θ, ∇θℓ)
-            return ℓθ, entropy 
-        end
-
         function actor_update()
             θ = Flux.params(actor, actor_crnn)
             Flux.reset!.((actor_crnn, critic_crnn))
@@ -191,51 +160,8 @@ function poststep(sac::RecurrentSACLearner{Tₛ, Tₐ}; env::AbstractMDP{Vector{
                 ℓθ = -mean(𝐯̂)
                 return ℓθ
             end
-            # println(∇θℓ[Flux.params(actor)[1]])
-            # println(∇θℓ[Flux.params(actor_crnn)[1]])
-            # @assert sum(abs.(∇θℓ[Flux.params(actor)[1]])) > 0
-            # @assert sum(abs.(∇θℓ[Flux.params(actor_crnn)[1]])) > 0
             Flux.update!(sac.optim_actor, θ, ∇θℓ)
             return ℓθ, entropy 
-        end
-
-        function critic_update_sequential()
-            ϕ = Flux.params(critic1, critic2, critic_crnn)
-
-            Flux.reset!.((actor_crnn, critic_crnn))
-            fill!(𝐜ᵃ, 0f0)
-            fill!(𝐜ᶜ, 0f0)
-            for t in 1:(horizon+1)
-                𝐜ᵃ[:, t, :] .= @views actor_crnn(𝐞[:, t, :])
-                𝐜ᶜ[:, t, :] .= @views critic_crnn(𝐞[:, t, :])
-            end
-            𝐜ᵃ′ = @view 𝐜ᵃ[:, 2:end, :]
-            𝐜ᶜ′ = @view 𝐜ᶜ[:, 2:end, :]
-            𝐬ᵃ′ = reshape(vcat(𝐜ᵃ′, 𝐨′), :, horizon * batch_size)
-            𝐬ᶜ′ = reshape(vcat(𝐜ᶜ′, 𝐨′), :, horizon * batch_size)
-            𝐚̃′, 𝐥𝐨𝐠𝛑𝐚̃′ = sample_action_logπ(actor, rng, 𝐬ᵃ′)
-            𝐬ᶜ′𝐚̃′ = vcat(𝐬ᶜ′, 𝐚̃′)
-            𝐪̂𝐚̃′ = min.(critic1′(𝐬ᶜ′𝐚̃′), critic2′(𝐬ᶜ′𝐚̃′))
-            𝐯̂′ = @views 𝐪̂𝐚̃′[1, :] - α * 𝐥𝐨𝐠𝛑𝐚̃′
-            𝐯̂′ = reshape(𝐯̂′, horizon, batch_size)
-            
-            Flux.reset!.((actor_crnn, critic_crnn))
-            ℓϕ, ∇ϕℓ = withgradient(ϕ) do
-                ℓϕ = 0f0
-                for t in 1:horizon
-                    𝐨ₜ, 𝐚ₜ, 𝐫ₜ, 𝐝ₜ′, 𝐧ₜ′ = Zygote.@ignore @views 𝐨[:, t, :], 𝐚[:, t, :], 𝐫[t, :], 𝐝′[t, :], 𝐧′[t, :]
-                    𝐜ₜᶜ = @views critic_crnn(𝐞[:, t, :])
-                    𝐬ₜᶜ𝐚ₜ = vcat(𝐜ₜᶜ, 𝐨ₜ, 𝐚ₜ)
-                    𝐪̂ₜ¹, 𝐪̂ₜ² = critic1(𝐬ₜᶜ𝐚ₜ)[1, :], critic2(𝐬ₜᶜ𝐚ₜ)[1, :]
-                    𝐯̂ₜ′ = Zygote.@ignore 𝐯̂′[t, :]
-                    𝛅ₜ¹ = (𝐫ₜ + γ * (1f0 .- 𝐝ₜ′) .* 𝐯̂ₜ′ - 𝐪̂ₜ¹) .* (1f0 .- 𝐧ₜ′)
-                    𝛅ₜ² = (𝐫ₜ + γ * (1f0 .- 𝐝ₜ′) .* 𝐯̂ₜ′ - 𝐪̂ₜ²) .* (1f0 .- 𝐧ₜ′)
-                    ℓϕ += 0.5f0 * (mean(𝛅ₜ¹.^2) + mean(𝛅ₜ².^2)) / horizon
-                end
-                return ℓϕ
-            end
-            Flux.update!(sac.optim_critics, ϕ, ∇ϕℓ)
-            return ℓϕ
         end
 
         function critic_update()
@@ -274,11 +200,6 @@ function poststep(sac::RecurrentSACLearner{Tₛ, Tₐ}; env::AbstractMDP{Vector{
                 ℓϕ = 0.5f0 * (mean(𝛅¹.^2) + mean(𝛅².^2))
                 return ℓϕ
             end
-            # println(" loss is ", ℓϕ)
-            # ∇ϕℓ[Flux.params(critic1)[1]] |> println
-            # @assert sum(abs.(∇ϕℓ[Flux.params(critic1)[1]])) > 0
-            # @assert sum(abs.(∇ϕℓ[Flux.params(critic2)[1]])) > 0
-            # @assert sum(abs.(∇ϕℓ[Flux.params(critic_crnn)[1]])) > 0
             Flux.update!(sac.optim_critics, ϕ, ∇ϕℓ)
             return ℓϕ
         end
