@@ -11,6 +11,7 @@ mutable struct SACLearner{Tₛ<:AbstractFloat, Tₐ<:AbstractFloat} <: AbstractH
     min_explore_steps::Int
     train_interval::Int
     batch_size::Int
+    auto_tune_α::Bool
 
     s::Union{Vector{Tₛ}, Nothing}
     buff::CircularBuffer{Tuple{Vector{Tₛ}, Vector{Tₐ}, Float64, Vector{Tₛ}, Bool}}
@@ -20,9 +21,9 @@ mutable struct SACLearner{Tₛ<:AbstractFloat, Tₐ<:AbstractFloat} <: AbstractH
 
     stats::Dict{Symbol, Float32}
 
-    function SACLearner(π::SACPolicy{Tₛ, Tₐ}, critic, γ::Real, α, η_actor, η_critic; polyak=0.995, min_explore_steps=10000, train_interval=1, batch_size=32, buffer_size=1000000) where {Tₛ <: AbstractFloat, Tₐ <: AbstractFloat}
+    function SACLearner(π::SACPolicy{Tₛ, Tₐ}, critic, γ::Real=0.99, α=0.2, η_actor=0.0003, η_critic=0.0003; polyak=0.995, min_explore_steps=10000, train_interval=1, batch_size=64, buffer_size=1000000, auto_tune_α=true) where {Tₛ <: AbstractFloat, Tₐ <: AbstractFloat}
         buff = CircularBuffer{Tuple{Vector{Tₛ}, Vector{Tₐ}, Float64, Vector{Tₛ}, Bool}}(buffer_size)
-        new{Tₛ, Tₐ}(π, (critic, deepcopy(critic)), γ, α, polyak, min_explore_steps, train_interval, batch_size, nothing, buff, (deepcopy(critic), deepcopy(critic)), Adam(η_actor), Adam(η_critic), Dict{Symbol, Float32}())
+        new{Tₛ, Tₐ}(π, (critic, deepcopy(critic)), γ, α, polyak, min_explore_steps, train_interval, batch_size, auto_tune_α, nothing, buff, (deepcopy(critic), deepcopy(critic)), Adam(η_actor), Adam(η_critic), Dict{Symbol, Float32}())
     end
 end
 
@@ -61,9 +62,11 @@ function poststep(sac::SACLearner{Tₛ, Tₐ}; env::AbstractMDP{Vector{Tₛ}, Ve
         Flux.update!(sac.optim_actor, θ, ∇θℓ)
 
         H = -mean(sample_action_logπ(π, rng, 𝐬)[2])
-        target_ent::Float32 = -1 / size(action_space(env), 1)
-        α = clamp(exp(log(α) - 0.0003f0 * (H - target_ent)), 0.0001f0, 1000f0)
-        sac.α = α
+        if sac.auto_tune_α
+            target_ent::Float32 = -1 / size(action_space(env), 1)
+            α = clamp(exp(log(α) - 0.0003f0 * (H - target_ent)), 0.0001f0, 1000f0)
+            sac.α = α
+        end
 
         ϕ′ = Flux.params(critics′)
         for (param, param′) in zip(ϕ, ϕ′); copy!(param′, ρ * param′ + (1 - ρ) * param); end
