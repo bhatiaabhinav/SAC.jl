@@ -6,7 +6,7 @@ using UnPack
 using DataStructures
 using StatsBase
 
-export SACPolicy, get_μ_σ_logσ, sample_action_logπ
+export SACPolicy
 
 struct SACPolicy{Tₛ <: AbstractFloat, Tₐ <: AbstractFloat} <: AbstractPolicy{Vector{Tₛ}, Vector{Tₐ}}
     actor_model # latent, μ, logσ

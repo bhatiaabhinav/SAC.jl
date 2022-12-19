@@ -21,7 +21,7 @@ mutable struct SACLearner{Tₛ<:AbstractFloat, Tₐ<:AbstractFloat} <: AbstractH
 
     stats::Dict{Symbol, Float32}
 
-    function SACLearner(π::SACPolicy{Tₛ, Tₐ}, critic, γ::Real=0.99, α=0.2, η_actor=0.0003, η_critic=0.0003; polyak=0.995, min_explore_steps=10000, train_interval=1, batch_size=64, buffer_size=1000000, auto_tune_α=true) where {Tₛ <: AbstractFloat, Tₐ <: AbstractFloat}
+    function SACLearner(π::SACPolicy{Tₛ, Tₐ}, critic, γ::Real; α=0.2, η_actor=0.0003, η_critic=0.0003, polyak=0.995, min_explore_steps=10000, train_interval=1, batch_size=64, buffer_size=1000000, auto_tune_α=true) where {Tₛ <: AbstractFloat, Tₐ <: AbstractFloat}
         buff = CircularBuffer{Tuple{Vector{Tₛ}, Vector{Tₐ}, Float64, Vector{Tₛ}, Bool}}(buffer_size)
         new{Tₛ, Tₐ}(π, (critic, deepcopy(critic)), γ, α, polyak, min_explore_steps, train_interval, batch_size, auto_tune_α, nothing, buff, (deepcopy(critic), deepcopy(critic)), Adam(η_actor), Adam(η_critic), Dict{Symbol, Float32}())
     end

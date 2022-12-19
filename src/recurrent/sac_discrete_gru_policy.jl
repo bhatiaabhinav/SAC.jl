@@ -6,22 +6,23 @@ using UnPack
 using DataStructures
 using StatsBase
 
-export ContextualSACPolicy
+export ContextualSACDiscretePolicy
 
-mutable struct ContextualSACPolicy{Tₛ <: AbstractFloat, Tₐ <: AbstractFloat} <: AbstractPolicy{Vector{Tₛ}, Vector{Tₐ}}
-    π::SACPolicy{Tₛ, Tₐ}
+mutable struct ContextualSACDiscretePolicy{T <: AbstractFloat} <: AbstractPolicy{Vector{T}, Int}
+    π::SACDiscretePolicy{T}
     crnn::GRUContextRNN
     context::Matrix{Float32}
     isnewtraj::Float32
     prev_a::Vector{Float32}
     prev_r::Float32
-    function ContextualSACPolicy(π::SACPolicy{Tₛ, Tₐ}, crnn::GRUContextRNN) where {Tₛ, Tₐ}
-        new{Tₛ, Tₐ}(π, crnn, zeros(Float32, size(get_rnn_state(crnn), 1), 1), 1f0, zeros(Float32, size(π.shift)), 0f0)
+    function ContextualSACDiscretePolicy(π::SACDiscretePolicy{T}, crnn::GRUContextRNN) where {T}
+        n = length(π.actor_model.layers[end].bias)
+        new{T}(π, crnn, zeros(Float32, size(get_rnn_state(crnn), 1), 1), 1f0, zeros(Float32, n), 0f0)
     end
 end
 
 
-function (p::ContextualSACPolicy{Tₛ, Tₐ})(rng::AbstractRNG, o::Vector{Tₛ})::Vector{Tₐ} where {Tₛ, Tₐ}
+function (p::ContextualSACDiscretePolicy{T})(rng::AbstractRNG, o::Vector{T})::Int where {T}
     set_rnn_state!(p.crnn, p.context)
     # assuming the policy will not be called on a terminal state
     evidence = reshape(vcat(p.isnewtraj, p.prev_a, p.prev_r, tof32(o), 0f0), :, 1)
@@ -29,21 +30,20 @@ function (p::ContextualSACPolicy{Tₛ, Tₐ})(rng::AbstractRNG, o::Vector{Tₛ})
     o = reshape(o, :, 1) |> tof32
     s = vcat(c, o)
     a = p.π(rng, s)
-    return convert(Vector{Tₐ}, a[:, 1])
+    return a[1]
 end
 
-function (p::ContextualSACPolicy{Tₛ, Tₐ})(o::Vector{Tₛ}, a::Vector{Tₐ})::Float64 where {Tₛ, Tₐ}  # returns log probability density
+function (p::ContextualSACDiscretePolicy{T})(o::Vector{T}, a::Int)::Float64 where {T}  # returns probability
     set_rnn_state!(p.crnn, p.context)
     evidence = reshape(vcat(p.isnewtraj, p.prev_a, p.prev_r, tof32(o), 0f0), :, 1)
     c = p.crnn(evidence)
     o = reshape(o, :, 1) |> tof32
     s = vcat(c, o)
-    a = reshape(a, :, 1)
-    return p.π(s, a)[1]
+    return p.π(s, :)[a, 1]
 end
 
 
-function MDPs.preepisode(p::ContextualSACPolicy{Tₛ, Tₐ}; kwargs...) where {Tₛ, Tₐ}
+function MDPs.preepisode(p::ContextualSACDiscretePolicy{T}; kwargs...) where {T}
     @debug "Resetting policy"
     p.isnewtraj = 1f0
     fill!(p.prev_a, 0f0)
@@ -52,9 +52,10 @@ function MDPs.preepisode(p::ContextualSACPolicy{Tₛ, Tₐ}; kwargs...) where {T
     nothing
 end
 
-function MDPs.poststep(p::ContextualSACPolicy{Tₛ, Tₐ}; env, kwargs...) where {Tₛ, Tₐ}
+function MDPs.poststep(p::ContextualSACDiscretePolicy{T}; env, kwargs...) where {T}
     p.isnewtraj = 0f0
-    copy!(p.prev_a, action(env))
+    fill!(p.prev_a, 0f0)
+    p.prev_a[action(env)] = 1f0
     p.prev_r = reward(env)
     copy!(p.context, get_rnn_state(p.crnn))
     @debug "Storing action, reward, grustate in policy struct"

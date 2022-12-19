@@ -1,9 +1,9 @@
 import MDPs: preexperiment, preepisode, prestep, poststep, postepisode, postexperiment
 using Random
-export RecurrentSACLearner
+export RecurrentSACDiscreteLearner
 
-mutable struct RecurrentSACLearner{Tₛ<:AbstractFloat, Tₐ<:AbstractFloat} <: AbstractHook
-    π::ContextualSACPolicy{Tₛ, Tₐ}
+mutable struct RecurrentSACDiscreteLearner{T<:AbstractFloat} <: AbstractHook
+    π::ContextualSACDiscretePolicy{T}
     critics
     critic_crnn
     γ::Float32
@@ -22,9 +22,8 @@ mutable struct RecurrentSACLearner{Tₛ<:AbstractFloat, Tₐ<:AbstractFloat} <: 
     minibatch                               # preallocated memory for sampling a minibatch. Tuple 𝐞, 𝐨, 𝐚, 𝐫, 𝐨′, 𝐝′, 𝐧′
     𝐜ᵃ::AbstractArray{Float32, 3}           # preallocated memory for recording actor's context during a rollout
     𝐜ᶜ::AbstractArray{Float32, 3}           # preallocated memory for recording actor's context during a rollout
-    ξ::AbstractArray{Float32, 2}            # preallocated memory for sampling actor's noise
 
-    actor::SACPolicy{Tₛ, Tₐ}      # train this sac actor and periodically copy weights to the original actor contextual policy.
+    actor::SACDiscretePolicy{T}     # train this sac actor and periodically copy weights to the original actor contextual policy.
     actor_crnn::GRUContextRNN               # train this actor crnn and periodically copy weights to the original actor context rnn
     critics′                                # target critic
     optim_actor::Adam
@@ -32,8 +31,8 @@ mutable struct RecurrentSACLearner{Tₛ<:AbstractFloat, Tₐ<:AbstractFloat} <: 
 
     stats::Dict{Symbol, Float32}
 
-    function RecurrentSACLearner(π::ContextualSACPolicy{Tₛ, Tₐ}, critic, critic_context_rnn, γ::Real, horizon::Int, aspace, sspace; α=0.2, η_actor=0.0003, η_critic=0.0003, polyak=0.995, batch_size=32, min_explore_steps=horizon*batch_size, tbptt_horizon=horizon, buffer_size=10000000, buff_mem_MB_cap=Inf, auto_tune_α=true, device=Flux.cpu) where {Tₛ <: AbstractFloat, Tₐ <: AbstractFloat}
-        each_entry_size = 1 + size(aspace, 1) + 1 + size(sspace, 1) + 1
+    function RecurrentSACDiscreteLearner(π::ContextualSACDiscretePolicy{T}, critic, critic_context_rnn, γ::Real, horizon::Int, aspace::MDPs.IntegerSpace, sspace; α=0.1, η_actor=0.0003, η_critic=0.0003, polyak=0.995, batch_size=32, min_explore_steps=horizon*batch_size, tbptt_horizon=horizon, buffer_size=10000000, buff_mem_MB_cap=Inf, auto_tune_α=false, device=Flux.cpu) where {T <: AbstractFloat}
+        each_entry_size = 1 + length(aspace) + 1 + size(sspace, 1) + 1
         buffer_size = min(buffer_size, buff_mem_MB_cap * 2^20 / (4 * each_entry_size)) |> floor |> Int
         buff = zeros(Float32, each_entry_size, buffer_size)
         𝐞 = zeros(Float32, each_entry_size, horizon + 1, batch_size) |> device
@@ -46,29 +45,30 @@ mutable struct RecurrentSACLearner{Tₛ<:AbstractFloat, Tₐ<:AbstractFloat} <: 
         minibatch = (𝐞, 𝐨, 𝐚, 𝐫, 𝐨′, 𝐝′, 𝐧′)
         𝐜ᵃ = zeros(Float32, size(get_rnn_state(π.crnn), 1), horizon + 1, batch_size) |> device
         𝐜ᶜ = zeros(Float32, size(get_rnn_state(critic_context_rnn), 1), horizon + 1, batch_size) |> device
-        ξ = randn(Float32, size(aspace, 1), horizon * batch_size) |> device
-        new{Tₛ, Tₐ}(π, (device(deepcopy(critic)), device(deepcopy(critic))), device(deepcopy(critic_context_rnn)), γ, α, polyak, min_explore_steps, batch_size, horizon, tbptt_horizon, auto_tune_α, device, buff, 1, Set{Int}(), minibatch, 𝐜ᵃ, 𝐜ᶜ, ξ, device(deepcopy(π.π)), device(deepcopy(π.crnn)), (device(deepcopy(critic)), device(deepcopy(critic))), Adam(η_actor), Adam(η_critic), Dict{Symbol, Float32}())
+        new{T}(π, (device(deepcopy(critic)), device(deepcopy(critic))), device(deepcopy(critic_context_rnn)), γ, α, polyak, min_explore_steps, batch_size, horizon, tbptt_horizon, auto_tune_α, device, buff, 1, Set{Int}(), minibatch, 𝐜ᵃ, 𝐜ᶜ, device(deepcopy(π.π)), device(deepcopy(π.crnn)), (device(deepcopy(critic)), device(deepcopy(critic))), Adam(η_actor), Adam(η_critic), Dict{Symbol, Float32}())
     end
 end
 
-function increment_buff_head!(sac::RecurrentSACLearner)
+function increment_buff_head!(sac::RecurrentSACDiscreteLearner)
     cap = size(sac.buff, 2)
     sac.buff_head = ((sac.buff_head + 1) - 1) % cap + 1
     nothing
 end
 
-function push_to_buff!(sac::RecurrentSACLearner, is_new_traj, prev_action, prev_reward, cur_state, cur_state_terminal)
+function push_to_buff!(sac::RecurrentSACDiscreteLearner, is_new_traj, prev_action::Int, prev_reward, cur_state, cur_state_terminal, aspace::MDPs.IntegerSpace)
     buff = sac.buff
     m = sac.buff_head
+    n_actions = length(aspace)
 
     if Bool(buff[1, m])
         delete!(sac.traj_start_points, m)
-    end 
+    end
 
     buff[1, m] = is_new_traj
-    buff[1+1:1+length(prev_action), m] .= prev_action
-    buff[1+length(prev_action)+1, m] = prev_reward
-    buff[1+length(prev_action)+1+1:1+length(prev_action)+1+length(cur_state), m] .= cur_state
+    buff[1+1:1+n_actions, m] .= 0f0
+    buff[1+prev_action, m] = 1f0
+    buff[1+n_actions+1, m] = prev_reward
+    buff[1+n_actions+1+1:1+n_actions+1+length(cur_state), m] .= cur_state
     buff[end, m] = cur_state_terminal
 
     if Bool(is_new_traj)
@@ -79,10 +79,11 @@ function push_to_buff!(sac::RecurrentSACLearner, is_new_traj, prev_action, prev_
     nothing
 end
 
-function sample_from_buff!(sac::RecurrentSACLearner, env)
+function sample_from_buff!(sac::RecurrentSACDiscreteLearner, env)
     (𝐞, 𝐨, 𝐚, 𝐫, 𝐨′, 𝐝′, 𝐧′), seq_len, batch_size = sac.minibatch, sac.horizon + 1, sac.batch_size
     cap = size(sac.buff, 2)
     @assert seq_len < cap
+    n_actions = length(action_space(env))
 
     
     function isvalidstartpoint(p_begin)
@@ -104,9 +105,10 @@ function sample_from_buff!(sac::RecurrentSACLearner, env)
         𝐞[:, :, n] .= sac.device(sac.buff[:, indices])
     end
 
-    prev_actions = @view 𝐞[1+1:1+length(action(env)), :, :]
-    prev_rewards = @view 𝐞[1+length(action(env))+1, :, :]
-    cur_obs = @view 𝐞[1+length(action(env))+1+1:1+length(action(env))+1+length(state(env)), :, :]
+    # Note: "actions" are onehot
+    prev_actions = @view 𝐞[1+1:1+n_actions, :, :]
+    prev_rewards = @view 𝐞[1+n_actions+1, :, :]
+    cur_obs = @view 𝐞[1+n_actions+1+1:1+n_actions+1+length(state(env)), :, :]
     
     obs = @view cur_obs[:, 1:end-1, :]
     actions = @view prev_actions[:, 2:end, :]
@@ -120,21 +122,19 @@ function sample_from_buff!(sac::RecurrentSACLearner, env)
     return 𝐞, 𝐨, 𝐚, 𝐫, 𝐨′, 𝐝′, 𝐧′
 end
 
-function preepisode(sac::RecurrentSACLearner; env, kwargs...)
-    push_to_buff!(sac, true, zero(action(env)), 0f0, state(env), in_absorbing_state(env))
+function preepisode(sac::RecurrentSACDiscreteLearner; env, kwargs...)
+    push_to_buff!(sac, true, 1, 0f0, state(env), in_absorbing_state(env), action_space(env))
 end
 
-function poststep(sac::RecurrentSACLearner{Tₛ, Tₐ}; env::AbstractMDP{Vector{Tₛ}, Vector{Tₐ}}, steps::Int, returns, rng::AbstractRNG, kwargs...) where {Tₛ, Tₐ}
-    @unpack actor, actor_crnn, critics, critic_crnn, γ, α, ρ, batch_size, horizon, tbptt_horizon, 𝐜ᶜ, 𝐜ᵃ, ξ, critics′ = sac
+function poststep(sac::RecurrentSACDiscreteLearner{T}; env::AbstractMDP{Vector{T}, Int}, steps::Int, returns, rng::AbstractRNG, kwargs...) where {T}
+    @unpack actor, actor_crnn, critics, critic_crnn, γ, α, ρ, batch_size, horizon, tbptt_horizon, 𝐜ᶜ, 𝐜ᵃ, critics′ = sac
 
-    push_to_buff!(sac, false, action(env), reward(env), state(env), in_absorbing_state(env))
+    push_to_buff!(sac, false, action(env), reward(env), state(env), in_absorbing_state(env), action_space(env))
 
     if steps >= sac.min_explore_steps && (steps % 50 == 0)
         @debug "sampling trajectories"
         𝐞, 𝐨, 𝐚, 𝐫, 𝐨′, 𝐝′, 𝐧′  = sample_from_buff!(sac, env)
-
-        critic1, critic2 = critics
-        critic1′, critic2′ = critics′
+        # note: 𝐚 is onehot!
 
         function actor_update()
             θ = Flux.params(actor, actor_crnn)
@@ -146,18 +146,16 @@ function poststep(sac::RecurrentSACLearner{Tₛ, Tₐ}; env::AbstractMDP{Vector{
             𝐬ᶜ = @views reshape(vcat(𝐜ᶜ[:, 1:horizon, :], 𝐨), :, horizon * batch_size)
             𝐨 = reshape(𝐨, :, horizon * batch_size)
             entropy = 0f0
-            Random.randn!(rng, sac.ξ)
             ℓθ, ∇θℓ = withgradient(θ) do
                 _𝐜ᵃ = reduce(hcat, map(1:horizon) do t
                     @views reshape(actor_crnn(𝐞[:, t, :]), :, 1, batch_size)
                 end)
                 _𝐜ᵃ = reshape(_𝐜ᵃ, :, horizon * batch_size)
                 𝐬ᵃ = vcat(_𝐜ᵃ, 𝐨)
-                𝐚̃, 𝐥𝐨𝐠𝛑𝐚̃ = sample_action_logπ(actor, rng, 𝐬ᵃ; ξ=ξ)
-                𝐬ᶜ𝐚̃ = vcat(𝐬ᶜ, 𝐚̃)
-                𝐪̂𝐚̃ = min.(critic1(𝐬ᶜ𝐚̃), critic2(𝐬ᶜ𝐚̃))
-                𝐯̂ = @views 𝐪̂𝐚̃[1, :] - α * 𝐥𝐨𝐠𝛑𝐚̃  # estimated value of s in expectation over 𝐚̃
-                entropy += -mean(𝐥𝐨𝐠𝛑𝐚̃)
+                𝛑, log𝛑 = get_probs_logprobs(actor, 𝐬ᵃ)
+                𝐪̂ = min.(map(critic -> critic(𝐬ᶜ), critics)...)
+                𝐯̂ = sum(𝛑 .* (𝐪̂ - α * log𝛑); dims=1)
+                entropy += -mean(sum(𝛑 .* log𝛑; dims=1))
                 ℓθ = -mean(𝐯̂)
                 return ℓθ
             end
@@ -166,7 +164,7 @@ function poststep(sac::RecurrentSACLearner{Tₛ, Tₐ}; env::AbstractMDP{Vector{
         end
 
         function critic_update()
-            ϕ = Flux.params(critic1, critic2, critic_crnn)
+            ϕ = Flux.params(critics..., critic_crnn)
             Flux.reset!.((actor_crnn, critic_crnn))
             fill!(𝐜ᵃ, 0f0)
             fill!(𝐜ᶜ, 0f0)
@@ -178,13 +176,13 @@ function poststep(sac::RecurrentSACLearner{Tₛ, Tₐ}; env::AbstractMDP{Vector{
             𝐜ᶜ′ = @view 𝐜ᶜ[:, 2:end, :]
             𝐬ᵃ′ = reshape(vcat(𝐜ᵃ′, 𝐨′), :, horizon * batch_size)
             𝐬ᶜ′ = reshape(vcat(𝐜ᶜ′, 𝐨′), :, horizon * batch_size)
-            Random.randn!(rng, sac.ξ)
-            𝐚̃′, 𝐥𝐨𝐠𝛑𝐚̃′ = sample_action_logπ(actor, rng, 𝐬ᵃ′; ξ=ξ)
-            𝐬ᶜ′𝐚̃′ = vcat(𝐬ᶜ′, 𝐚̃′)
-            𝐪̂𝐚̃′ = min.(critic1′(𝐬ᶜ′𝐚̃′), critic2′(𝐬ᶜ′𝐚̃′))
-            𝐯̂′ = @views 𝐪̂𝐚̃′[1, :] - α * 𝐥𝐨𝐠𝛑𝐚̃′
+
+            𝛑′, log𝛑′ = get_probs_logprobs(actor, 𝐬ᵃ′)
+            𝐪̂′ = min.(map(critic -> critic(𝐬ᶜ′), critics′)...)
+            𝐯̂′ =  sum(𝛑′ .* (𝐪̂′ - α * log𝛑′); dims=1)[1, :]
+
             𝐨 = reshape(𝐨, :, horizon * batch_size)
-            𝐚 = reshape(𝐚, :, horizon * batch_size)
+            𝐚 = argmax(reshape(𝐚, :, horizon * batch_size), dims=1)[1, :] # CartesianIndices
             𝐫 = reshape(𝐫, horizon * batch_size)
             𝐝′ = reshape(𝐝′, horizon * batch_size)
             𝐧′ = reshape(𝐧′, horizon * batch_size)
@@ -194,10 +192,10 @@ function poststep(sac::RecurrentSACLearner{Tₛ, Tₐ}; env::AbstractMDP{Vector{
                     @views reshape(critic_crnn(𝐞[:, t, :]), :, 1, batch_size)
                 end)
                 _𝐜ᶜ = reshape(_𝐜ᶜ, :, horizon * batch_size)
-                𝐬ᶜ𝐚 = vcat(_𝐜ᶜ, 𝐨, 𝐚)
-                𝐪̂¹, 𝐪̂² = @views critic1(𝐬ᶜ𝐚)[1, :], critic2(𝐬ᶜ𝐚)[1, :]
-                𝛅¹ = (𝐫 + γ * (1f0 .- 𝐝′) .* 𝐯̂′ - 𝐪̂¹) .* (1f0 .- 𝐧′)
-                𝛅² = (𝐫 + γ * (1f0 .- 𝐝′) .* 𝐯̂′ - 𝐪̂²) .* (1f0 .- 𝐧′)
+                𝐬ᶜ = vcat(_𝐜ᶜ, 𝐨)
+                𝐪̂¹, 𝐪̂² = critics[1](𝐬ᶜ), critics[2](𝐬ᶜ)
+                𝛅¹ = (𝐫 + γ * (1f0 .- 𝐝′) .* 𝐯̂′ - 𝐪̂¹[𝐚]) .* (1f0 .- 𝐧′)
+                𝛅² = (𝐫 + γ * (1f0 .- 𝐝′) .* 𝐯̂′ - 𝐪̂²[𝐚]) .* (1f0 .- 𝐧′)
                 ℓϕ = 0.5f0 * (mean(𝛅¹.^2) + mean(𝛅².^2))
                 return ℓϕ
             end
@@ -206,7 +204,7 @@ function poststep(sac::RecurrentSACLearner{Tₛ, Tₐ}; env::AbstractMDP{Vector{
         end
 
         function alpha_update(current_ent)
-            target_ent::Float32 = -1 / size(action_space(env), 1)
+            target_ent::Float32 = 0.98f0 * log(length(action_space(env)))
             α = clamp(exp(log(α) - 0.0003f0 * (current_ent - target_ent)), 0.0001f0, 1000f0)
             sac.α = α
         end

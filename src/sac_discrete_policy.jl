@@ -10,8 +10,8 @@ struct SACDiscretePolicy{T<:AbstractFloat} <: AbstractPolicy{Vector{T}, Int}
 end
 
 Flux.@functor SACDiscretePolicy (actor_model, )
-Flux.gpu(p::SACDiscretePolicy{T}) where {T}  = SACDiscretePolicy{T}(Flux.gpu(p.actor_model))
-Flux.cpu(p::SACDiscretePolicy{T}) where {T}  = SACDiscretePolicy{T}(Flux.cpu(p.actor_model))
+Flux.gpu(p::SACDiscretePolicy{T}) where {T}  = SACDiscretePolicy{T}(Flux.gpu(p.actor_model), p.deterministic)
+Flux.cpu(p::SACDiscretePolicy{T}) where {T}  = SACDiscretePolicy{T}(Flux.cpu(p.actor_model), p.deterministic)
 
 
 function (p::SACDiscretePolicy{T})(rng::AbstractRNG, s::Vector{T})::Int where {T}

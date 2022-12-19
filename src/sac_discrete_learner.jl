@@ -21,7 +21,7 @@ mutable struct SACDiscreteLearner{T<:AbstractFloat} <: AbstractHook
 
     stats::Dict{Symbol, Float32}
 
-    function SACDiscreteLearner(π::SACDiscretePolicy{T}, critic, γ::Real=0.99, α=0.1, η_actor=0.0003, η_critic=0.0003; polyak=0.995, min_explore_steps=10000, train_interval=1, batch_size=64, buffer_size=1000000, auto_tune_α=false) where {T <: AbstractFloat}
+    function SACDiscreteLearner(π::SACDiscretePolicy{T}, critic, γ::Real; α=0.1, η_actor=0.0003, η_critic=0.0003, polyak=0.995, min_explore_steps=10000, train_interval=1, batch_size=64, buffer_size=1000000, auto_tune_α=false) where {T <: AbstractFloat}
         buff = CircularBuffer{Tuple{Vector{T}, Int, Float64, Vector{T}, Bool}}(buffer_size)
         new{T}(π, (critic, deepcopy(critic)), γ, α, polyak, min_explore_steps, train_interval, batch_size, auto_tune_α, nothing, buff, (deepcopy(critic), deepcopy(critic)), Adam(η_actor), Adam(η_critic), Dict{Symbol, Float32}())
     end
@@ -51,6 +51,7 @@ function poststep(sac::SACDiscreteLearner{T}; env::AbstractMDP{Vector{T}, Int}, 
         ϕ = Flux.params(critics...)
         ℓϕ, ∇ϕℓ = Flux.Zygote.withgradient(ϕ) do
             𝐪̂¹, 𝐪̂² = critics[1](𝐬), critics[2](𝐬)
+            println(size.((𝐫, 𝐝′, 𝐯̂′, 𝐚, 𝐪̂¹, 𝐪̂¹[𝐚])))
             𝛅¹ = (𝐫 + γ * (1f0 .- 𝐝) .* 𝐯̂′ - 𝐪̂¹[𝐚])
             𝛅² = (𝐫 + γ * (1f0 .- 𝐝) .* 𝐯̂′ - 𝐪̂²[𝐚])
             ℓϕ = 0.5f0 * (mean(𝛅¹.^2) + mean(𝛅².^2))
