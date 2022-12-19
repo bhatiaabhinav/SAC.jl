@@ -51,7 +51,6 @@ function poststep(sac::SACDiscreteLearner{T}; env::AbstractMDP{Vector{T}, Int}, 
         ϕ = Flux.params(critics...)
         ℓϕ, ∇ϕℓ = Flux.Zygote.withgradient(ϕ) do
             𝐪̂¹, 𝐪̂² = critics[1](𝐬), critics[2](𝐬)
-            println(size.((𝐫, 𝐝′, 𝐯̂′, 𝐚, 𝐪̂¹, 𝐪̂¹[𝐚])))
             𝛅¹ = (𝐫 + γ * (1f0 .- 𝐝) .* 𝐯̂′ - 𝐪̂¹[𝐚])
             𝛅² = (𝐫 + γ * (1f0 .- 𝐝) .* 𝐯̂′ - 𝐪̂²[𝐚])
             ℓϕ = 0.5f0 * (mean(𝛅¹.^2) + mean(𝛅².^2))
