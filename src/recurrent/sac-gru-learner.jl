@@ -129,7 +129,7 @@ function poststep(sac::RecurrentSACLearner{Tₛ, Tₐ}; env::AbstractMDP{Vector{
 
     push_to_buff!(sac, false, action(env), reward(env), state(env), in_absorbing_state(env))
 
-    if steps >= sac.min_explore_steps && (steps % (horizon ÷ 4) == 0)
+    if steps >= sac.min_explore_steps && (steps % (horizon ÷ tbptt_horizon) == 0)
         @debug "sampling trajectories"
         𝐞, 𝐨, 𝐚, 𝐫, 𝐨′, 𝐝′, 𝐧′  = sample_from_buff!(sac, env)
 
