@@ -17,7 +17,7 @@ mutable struct ContextualSACDiscretePolicy{T <: AbstractFloat} <: AbstractPolicy
     prev_r::Float32
     function ContextualSACDiscretePolicy(π::SACDiscretePolicy{T}, crnn::GRUContextRNN) where {T}
         n = length(π.actor_model.layers[end].bias)
-        new{T}(π, crnn, zeros(Float32, size(get_rnn_state(crnn), 1), 1), 1f0, zeros(Float32, n), 0f0)
+        new{T}(π, crnn, zeros(Float32, size(get_start_state(crnn), 1), 1), 1f0, zeros(Float32, n), 0f0)
     end
 end
 
@@ -48,7 +48,7 @@ function MDPs.preepisode(p::ContextualSACDiscretePolicy{T}; kwargs...) where {T}
     p.isnewtraj = 1f0
     fill!(p.prev_a, 0f0)
     p.prev_r = 0
-    fill!(p.context, 0f0)
+    copy!(p.context, get_start_state(p.crnn))
     nothing
 end
 

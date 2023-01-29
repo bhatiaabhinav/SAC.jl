@@ -16,6 +16,7 @@ function Flux.reset!(crnn::GRUContextRNN)
     nothing
 end
 
+@inline get_start_state(crnn::GRUContextRNN) = crnn.model.layers[end].cell.state0
 @inline get_rnn_state(crnn::GRUContextRNN) = crnn.model.layers[end].state
 
 function set_rnn_state!(crnn::GRUContextRNN, hs::AbstractMatrix{Float32})
