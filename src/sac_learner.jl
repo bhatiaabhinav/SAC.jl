@@ -71,16 +71,14 @@ function poststep(sac::SACLearner{Tₛ, Tₐ}; env::AbstractMDP{Vector{Tₛ}, Ve
         ϕ′ = Flux.params(critics′)
         for (param, param′) in zip(ϕ, ϕ′); copy!(param′, ρ * param′ + (1 - ρ) * param); end
 
-        if steps % 1000 == 0
-            v̄ = -ℓθ
-            sac.stats[:ℓϕ] = ℓϕ
-            sac.stats[:ℓθ] = ℓθ
-            sac.stats[:v̄] = v̄
-            sac.stats[:H] = H
-            sac.stats[:α] = α
-            episodes = length(returns)
-            @debug "learning stats" steps episodes ℓϕ ℓθ v̄ H α
-        end
+        v̄ = -ℓθ
+        sac.stats[:ℓϕ] = ℓϕ
+        sac.stats[:ℓθ] = ℓθ
+        sac.stats[:v̄] = v̄
+        sac.stats[:H] = H
+        sac.stats[:α] = α
+        episodes = length(returns)
+        @debug "learning stats" steps episodes ℓϕ ℓθ v̄ H α
     end
     nothing
 end
