@@ -63,7 +63,7 @@ function poststep(sac::SACLearner{Tₛ, Tₐ}; env::AbstractMDP{Vector{Tₛ}, Ve
 
         H = -mean(sample_action_logπ(π, rng, 𝐬)[2])
         if sac.auto_tune_α
-            target_ent::Float32 = -1 / size(action_space(env), 1)
+            target_ent::Float32 = -size(action_space(env), 1)
             α = clamp(exp(log(α) - 0.0003f0 * (H - target_ent)), 0.0001f0, 1000f0)
             sac.α = α
         end
